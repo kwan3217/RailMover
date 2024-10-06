@@ -18,9 +18,9 @@ class Rail:
     appropriate SI units, but as is always the case, you are free to
     use whatever set of consistent physical units you want.
 
-    s: actual distance along rail from r(0), m
-    t: time from epoch, s. Not used in this rail, but reserved for rail mover
-    u: rail parameter. Not the usual t, since that is reserved for actual time.
+    s: actual distance along rail from r(0), [m]
+    t: time from epoch, [s]. Not used in this rail, but reserved for rail mover
+    u: rail parameter, [1]. Not the usual t, since that is reserved for actual time.
     u0, u1: Domain of rail parameter, for instance 0 to 1 in a Bezier curve segment.
        Values outside this range request extrapolation, and the implementation must
        either do the extrapolation or raise ValueError. It is strongly suggested
@@ -37,51 +37,44 @@ class Rail:
     def r(self, u: float) -> np.array:
         """
         Position vector as a function of rail parameter.
-        :param u: Rail parameter
-        :return: Position of rail as a vector with components in meters
+        :param u: Rail parameter [1]
+        :return: Position of rail as a vector [m]
+
+        All curves need to override this method
         """
         raise NotImplementedError
 
-    def drdu(self, u: float, du: float = 1e-4) -> np.array:
+    def dnrdun(self, u: float, n:int) -> np.array:
         """
-        Differential change in position with respect to parameter
-        :param u: Rail parameter
+        Arbitrary derivative of position with respect to parameter
+
+        :param u: Rail parameter [1]
+        :param n: Order of derivative. N=0 returns the function itself,
+                  so the zeroth derivative is the function itself.
+                  Negative orders are not allowed.
         :param du: Differential to use. Ignored if we are using
                    calculus to use a true infinitesimal differential.
-        :return:
-        """
-        return self.r(u + du) - self.r(u)
+        :return: vector derivative, [m/1]=[m]
 
-    def d2rdu2(self, u: float, du: float = 1e-4) -> np.array:
+        Curves with an explicit form for the derivative should
+        override this method
         """
-        Second Differential change in position with respect to parameter
-        :param u:
-        :param du:
-        :return:
-        """
-        return self.drdu(u + du) - self.drdu(u)
+        raise NotImplementedError
 
-    def d3rdu3(self, u: float, du: float = 1e-4) -> np.array:
+    def dsdu(self, u: float) -> float:
         """
-        Third ifferential change in position with respect to parameter
-        :param u:
-        :param du:
-        :return:
-        """
-        return self.d2rdu2(u + du) - self.d2rdu2(u)
+        Derivative of distance along rail with respect to parameter
 
-    def ds(self, u: float, du: float = 1e-4) -> float:
-        """
-        Second differential distance, numerator of second derivative (d**2)s/du**2
-        If you have an explicit second derivative, multiply that result by
-        du**2
         :param u: Rail parameter
-        :param du: Differential parameter
-        :return: Second differential distance, m**2
-        """
-        return vlength(self.drdu(u, du))
+        :return: ds/du, derivative of distance along rail with respect to parameter
 
-    def step_s(self, u: float, s: float):
+        This function should NOT be overridden -- it is explicit and exact if
+        self.dnrdun(u,1) is explicit.
+        """
+        # This derivative is just the length of dr/du
+        return vlength(self.dnrdun(u, 1))
+
+    def step_s(self, u: float, s: float, quality:float):
         """
         Calculate the parameter which is a distance s away from a given
         parameter u
@@ -92,7 +85,7 @@ class Rail:
         """
         raise NotImplementedError
 
-    def T(self, u: float, du: float = 1e-4) -> np.array:
+    def T(self, u: float) -> np.array:
         """
         Calculate tangent vector to curve at given parameter. This vector
         will be unit-length and parallel to the derivative of the curve
@@ -100,17 +93,72 @@ class Rail:
         override this.
         :param u: Rail parameter
         :param du:
-        :return: Normalized tangent vector
+        :return: Normalized tangent vector, unitless
+
+        Should NOT be overridden. This is exact if dnrdun(u,1) is explicit
         """
         # Calculated with Frenet-Serret apparatus, as given
         # at https://en.wikipedia.org/wiki/Frenet%E2%80%93Serret_formulas
         # and valid only for 2D or 3D curves
-        return self.drdu(u, du) / self.ds(u, du)
+        # The given formula is T=dr/ds. We have dr/du and ds/du, so we have:
+        # T=dr/ds
+        #  =(dr/du)*(du/ds) # chain rule
+        #  =(dr/du)/(ds/du) # treat derivative as a fraction
+        n=self.dnrdun(u, 1)
+        d=self.dsdu(u)
+        return  n/d
 
-    def dT(self, u: float, du: float = 1e-4) -> np.array:
-        return self.T(u + du) - self.T(u)
+    def dTdu(self,u:float)->np.array:
+        """
+        Calculate the derivative of the tangent vector.
+        """
+        # We will need the first and second derivatives of
+        # the curve with respect to the parameter
+        rp=self.dnrdun(u,1)
+        rpp=self.dnrdun(u,2)
+        # We start with
+        # T(u)=r'(u)/s'(u)
+        # and want to find the derivative. We need the quotient rule, where:
+        #   h(u)=f(u)/g(u)
+        #         g(u)f'(u)-f(u)g'(u)
+        #   h'(u)=-------------------
+        #             (g(u))**2
+        # Here, we have:
+        #   h(u)=T(u)=r'(u)/s'(u)
+        # so we have:
+        #   f(u)=r'(u)    which is given
+        f=rp
+        #   f'(u)=r''(u)  which is given
+        fp=rpp
+        #   g(u)=s'(u)    which is given
+        g=self.dsdu(u)
+        #       =sqrt(r'(u).r'(u))  expanded definition of s'(u)=|r'(u)|
+        #   g'(u)=s''(u)
+        # which we need to figure out with the chain rule. If we define:
+        #   p(v)=v.v
+        #       =r'.r'
+        p=vdot(rp,rp)
+        #   q(p)=sqrt(p)
+        # we then have:
+        #   dq/dv=dq/dp*dp/dv
+        # or in prime notation:
+        #   q'(v)=q'(p(v))*p'(v)
+        # p'(v) is from the product rule and is:
+        #   p'=2*v.v'
+        # so in our case since v=r', we have:
+        #   p'=2*r'.r''
+        pp=2*vdot(rp,rpp)
+        # Now q'(p)=1/(2*sqrt(p)) by the power rule
+        qp=1/(2*np.sqrt(p))
+        # so g'(u)=q'(u)=q'(p)*p'(u) by the chain rule
+        gp=qp*pp
+        # Now we have all the parts and can use the quotient rule
+        hpn=g*fp-f*gp
+        hpd=g**2
+        hp=hpn/hpd
+        return hp
 
-    def N(self, u: float, du: float = 1e-4) -> np.array:
+    def N(self, u: float) -> np.array:
         """
         Calculate the normal vector. Should always be directed such that N(u)/kappa(u)
         points from the curve to the instantaneous center of curvature. In 2D, it's probably
@@ -121,9 +169,12 @@ class Rail:
         :param u:
         :return:
         """
-        raise NotImplementedError
+        # dT/ds=(dT/du)*(du/ds) # chain rule
+        #      =(dT/du)/(ds/du) # treat derivative as a fraction
+        dTds=self.dTdu(u)/self.dsdu(u)
+        return vnormalize(dTds)
 
-    def B(self, u: float, du: float = 1e-4) -> np.array:
+    def B(self, u: float) -> np.array:
         """
         Calculate the binormal vector, perpendicular to the
         instantaneous plane of the curve
@@ -131,9 +182,9 @@ class Rail:
         :param du:
         :return:
         """
-        return vcross(self.T(u,du),self.N(u,du))
+        return vcross(self.T(u),self.N(u))
 
-    def kappa(self, u: float, du: float = 1e-4) -> float:
+    def kappa(self, u: float) -> float:
         """
         Calculate the curvature. Intuitively, curvature is the measure
         of the curve's departure from linearity. Naturally a line would
@@ -144,23 +195,37 @@ class Rail:
         of curvature is rad/m, indicating that the curve deviates so many
         radians from its original path, for each meter along the path.
 
-        If the curvature is positive, then the center of curvature
-        is on the same side of the curve as N, and if negative, the opposite.
+        Curvature is always positive, and the center of curvature
+        is on the same side of the curve as N points.
         :param u:
         :return: Curvature in rad/m. Inverse of kappa is radius of curvature, m
 
-        Note -- default implementation is only well-defined for 2D and 3D curves.
         """
-        drdu = self.drdu(u, du) / du
-        d2rdu2 = self.d2rdu2(u, du) / du ** 2
+        if False:
+            # Frenet-Serret formula
+            dTds=self.dTdu(u,du)/self.dsdu(u,du)
+            return vlength(dTds)
+        else:
+            # Direct using dot-product formula at
+            # https://en.wikipedia.org/wiki/Curvature#General_expressions
+            # valid for any dimension of vector
+            du1=self.dnrdun(u,1)
+            du2=self.dnrdun(u,2)
+            sq1a=vlength(du1)**2
+            sq1b=vlength(du2)**2
+            sq1=sq1a*sq1b
+            sq2=vdot(du1,du2)**2
+            n=np.sqrt(sq1-sq2)
+            d=vlength(du1)**3
+            return n/d
 
-        return vcross(drdu, d2rdu2) / vlength(drdu) ** 3
-    def tau(self, u: float, du: float = 1e-4) -> float:
+
+    def tau(self, u: float) -> float:
         """
         Calculate the torsion. Intuitively for a curve through
         3D space, torsion is the measure of the curve's departure
         from planarity. The concrete definition is the speed of
-        rotation of the binormal vector B=T x N with respect to
+        rotation of the binormal vector K=T x N with respect to
         arc length. A 2D curve has a torsion of zero along its
         whole length.
         :param u:
@@ -168,8 +233,170 @@ class Rail:
         :return:
         """
         # Formula from https://en.wikipedia.org/wiki/Torsion_of_a_curve#Alternative_description
-        drxddr=vcross(self.drdu(u, du), self.d2rdu2(u, du))
-        return vdot(drxddr, self.d3rdu3(u, du))/vlength(drxddr)**2
+        du1=self.dnrdun(u, 1)
+        du2=self.dnrdun(u, 2)
+        du3=self.dnrdun(u, 3)
+        n1=vcross(du1, du2)
+        n=vdot(n1,du3)
+        d=vdot(n1,n1)
+        return n/d
+
+    def calc_u(self, s:float):
+        if s==0.0:
+            return 0.0
+        raise NotImplementedError("Todo - curve arc length stuff")
+
+    def plot_frame(self,u0,u1,du,step):
+        import matplotlib.pyplot as plt
+        fig=plt.figure()
+        xyz=fig.add_subplot(224,projection='3d')
+        xy=fig.add_subplot(221)
+        yz=fig.add_subplot(223)
+        xz=fig.add_subplot(222)
+        us = np.arange(u0, u1, du)
+        r = self.r(us)
+        x=r[0,:]
+        y=r[1,:]
+        z=r[2,:]
+        xyz.plot(x,y,z)
+        xyz.set_xlabel('x')
+        xyz.set_ylabel('y')
+        xyz.set_zlabel('z')
+        xy.plot(x,y)
+        xy.set_xlabel('x')
+        xy.set_ylabel('y')
+        xy.axis('equal')
+        yz.plot(y,z)
+        yz.set_xlabel('y')
+        yz.set_ylabel('z')
+        yz.axis('equal')
+        xz.plot(x,z)
+        xz.set_xlabel('x')
+        xz.set_ylabel('z')
+        xz.axis('equal')
+        for u in us[::step]:
+            r0 = self.r(u)
+            N = self.N(u)
+            r1 = r0 + N
+            r = np.hstack((r0, r1))
+            xyz.plot(r[0, :], r[1, :], r[2, :], 'g-')
+            xy.plot(r[0, :], r[1, :], 'g-')
+            yz.plot(r[1, :], r[2, :], 'g-')
+            xz.plot(r[0, :], r[2, :], 'g-')
+
+            T = self.T(u)
+            r1 = r0 + T
+            r = np.hstack((r0, r1))
+            xyz.plot(r[0, :], r[1, :], r[2, :], '-', color='#c0c000')
+            xy.plot(r[0, :], r[1, :], '-', color='#c0c000')
+            yz.plot(r[1, :], r[2, :], '-', color='#c0c000')
+            xz.plot(r[0, :], r[2, :], '-', color='#c0c000')
+
+            B = self.B(u)
+            r1 = r0 + B
+            r = np.hstack((r0, r1))
+            xyz.plot(r[0, :], r[1, :], r[2, :], 'b-')
+            xy.plot(r[0, :], r[1, :], 'b-')
+            yz.plot(r[1, :], r[2, :], 'b-')
+            xz.plot(r[0, :], r[2, :], 'b-')
+        xyz.set_aspect('equal')
+        plt.show()
+
+
+class NDerivRail(Rail):
+    """
+    Rail where the derivative needs to be calculated numerically. Don't intend
+    to ever actuall need this, we just keep the code for numerical derivative.
+    """
+    def __init__(self,du:float=1e-4):
+        self.du=du
+    def dnrdun(self, u: float, n:int) -> np.array:
+        """
+        Arbitrary derivative of position with respect to parameter
+
+        :param u: Rail parameter [1]
+        :param n: Order of derivative. N=0 returns the function itself,
+                  so the zeroth derivative is the function itself.
+                  Negative orders are not allowed.
+        :param du: Differential to use. Ignored if we are using
+                   calculus to use a true infinitesimal differential.
+        :return: vector derivative, [m/1]=[m]
+
+        Curves with an explicit form for the derivative should
+        override this method
+        """
+        if n==0:
+            return self.r(u)
+        else:
+            return (self.dnrdun(u+self.du,n-1)-self.dnrdun(u,n-1))/self.du
+
+
+class CircularRail(Rail):
+    def __init__(self, radius):
+        self.radius = radius
+
+    def r(self, u: float) -> np.array:
+        """
+        Position vector of a point on the circle.
+
+        :param u: Angle in radians [1]
+        :return: Position vector [m]
+        """
+        return np.array([[self.radius * np.cos(u)], [self.radius * np.sin(u)], [0.0*u]])
+
+    def dnrdun(self, u: float, n: int, du: float = 1e-4) -> np.array:
+        """
+        Explicit nth derivative of the position vector for a circular rail.
+
+        :param u: Angle in radians [1]
+        :param n: Order of the derivative
+        :param du: Differential angle (ignored for explicit calculation)
+        :return: nth derivative of the position vector [m/rad^n]
+        """
+        if n % 4 == 0:
+            return self.r(u)
+        elif n % 4 == 1:
+            return np.array([[-self.radius * np.sin(u)], [self.radius * np.cos(u)],[0.0]])
+        elif n % 4 == 2:
+            return np.array([[-self.radius * np.cos(u)], [-self.radius * np.sin(u)],[0.0]])
+        else:
+            return np.array([[self.radius * np.sin(u)], [-self.radius * np.cos(u)],[0.0]])
+
+
+class HelicalRail(Rail):
+    def __init__(self, pitch=1, radius=1):
+        self.pitch = pitch  # Distance the helix rises per revolution
+        self.radius=radius
+
+    def r(self, u: float) -> np.array:
+        """
+        Position vector of a point on the helix.
+
+        :param u: Angle in radians [1]
+        :return: Position vector [m]
+        """
+        return np.array([[self.radius*np.cos(u)], [self.radius*np.sin(u)], [self.pitch * u / (2 * np.pi)]])
+
+    def dnrdun(self, u: float, n: int) -> np.array:
+        """
+        Explicit nth derivative of the position vector for a helical rail.
+
+        :param u: Angle in radians [1]
+        :param n: Order of the derivative
+        :param du: Differential angle (ignored for explicit calculation)
+        :return: nth derivative of the position vector [m/rad^n]
+        """
+        if n == 0:
+            return self.r(u)
+        elif n == 1:
+            return np.array([[-self.radius*np.sin(u)], [ self.radius*np.cos(u)], [0*u+self.pitch / (2 * np.pi)]])
+        elif n == 2:
+            return np.array([[-self.radius*np.cos(u)], [-self.radius*np.sin(u)], [0*u]])
+        elif n == 3:
+            return np.array([[ self.radius*np.sin(u)], [-self.radius*np.cos(u)], [0*u]])
+        else:
+            raise NotImplemented("Fourth or higher derivative")
+
 
 
 class CubicRail(Rail):
