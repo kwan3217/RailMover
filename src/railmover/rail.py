@@ -404,20 +404,115 @@ class CubicRail(Rail):
     This is a rail which uses cubic parametric polynomials expressed in
     terms of a characteristic matrix.
 
-    r=R @ B @ T
+    r=R @ K @ U
     R - matrix of control points as column vectors
-    B - characteristic matrix
-    T - parameter column vector
+    K - characteristic matrix
+    U - parameter column vector
     """
-    def r(self, u: float|np.array) -> np.array:
+    def select_i(self,u:float):
+        try:
+            return set([int(i) for i in np.clip(np.floor(u),self.min_i,self.max_i)])
+        except TypeError:
+            return {int(np.clip(np.floor(u),self.min_i,self.max_i))}
+    def select_R(self,i:int):
+        """This depends on the curve implementation"""
+        raise NotImplementedError
+    fn = [[lambda u: u * 0 + 1,  # direct
+           lambda u: u,
+           lambda u: u ** 2,
+           lambda u: u ** 3],
+          [lambda u: u * 0,  # first derivative
+           lambda u: u * 0 + 1,
+           lambda u: 2 * u,
+           lambda u: 3 * u ** 2],
+          [lambda u: u * 0,  # second derivative
+           lambda u: u * 0,
+           lambda u: u * 0 + 2,
+           lambda u: 6 * u],
+          [lambda u: u * 0,  # third derivative
+           lambda u: u * 0,
+           lambda u: u * 0,
+           lambda u: u*0+6],
+          [lambda u: u * 0,  # fourth and higher derivatives are all zero
+           lambda u: u * 0,
+           lambda u: u * 0,
+           lambda u: u * 0],
+          ]
+    def calc_dnUdun(self,i:int,u:float,n:int):
+        """
+        Calculate the U matrix
+        """
+        # Handle higher than fourth derivative
+        if n>=len(self.fn):
+            n=len(self.fn)-1
+        seg_u=u-i
+        this_i = np.clip(np.floor(u),self.min_i,self.max_i).astype(int)
+        if not isinstance(u,np.ndarray):
+            if this_i==i:
+                return np.array([[f(seg_u)] for f in self.fn[n]])
+            else:
+                return np.array([[],[],[],[]])
+        w=(this_i==i)
+        return np.vstack([f(seg_u[w]) for f in self.fn[n]])
+    def calc_U(self,i:int,u:float):
+        return self.calc_dnUdun(i,u,0)
+    def dnrdun(self, u: float,n:int,du:float=1e-4) -> np.array:
+        """
+        Explicit derivative of position with respect to parameter
+
+        :param u: Rail parameter [1]
+        :param du: Differential to use. Ignored since we are using
+                   calculus to use a true infinitesimal differential.
+        :return: vector derivative, [m/1]=[m]
+
+        In the case of a cubic, we have the defining equation
+
+           r(u)=R @ K @ U(u)
+
+        The derivative of any matrix with respect to a scalar is just
+        the derivative of each cell with respect to that scalar. We
+        therefore have:
+
+           dr(u)/du = R @ K @ dU(u)/du
+
+        Each component of U is just a polynomial function of u so the
+        derivative is straightforward to calculate:
+
+        U(u)=[1 u u**2 u**3]^T
+        dU(u)/du=[0 1 2u 3u**2]
+        """
+        ii=self.select_i(u)
+        result=[]
+        for i in ii:
+            R=self.select_R(i)
+            U=self.calc_dnUdun(i,u,n)
+            result.append(R @ self.K @ U)
+        return np.hstack(result)
+    def r(self, u: float) -> np.array:
         """
         Position vector as a function of rail parameter.
         :param u: Rail parameter
         :return: Position of rail as a vector with components in meters
         """
-        is=self.select_i(u)
-        T=self.calcT(u)
-        raise NotImplementedError
+        return self.dnrdun(u,0)
+
+
+class BSpline(CubicRail):
+    K=np.array([[ 1.0,-3.0, 3.0,-1.0],
+                [ 4.0, 0.0,-6.0, 3.0],
+                [ 1.0, 3.0, 3.0,-3.0],
+                [ 0.0, 0.0, 0.0, 1.0]])/6.0
+    min_i=0
+    min_u=0.0
+    def __init__(self,control_points:np.array):
+        """
+        Create a BSpline
+        """
+        self.control_points=control_points
+        self.max_i=control_points.shape[1]-4
+        self.max_u=float(self.max_i)+1.0
+    def select_R(self,i:int):
+        return self.control_points[:,i:i+4]
 
 
 class BezierRail(Rail):
