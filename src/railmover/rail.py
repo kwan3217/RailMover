@@ -4,6 +4,7 @@ Simulate movement along a rail, such as on a roller-coaster
 
 import numpy as np
 from kwanmath.vector import vlength, vnormalize, vcross, vdot
+from numpy import newaxis
 
 
 class Rail:
@@ -419,6 +420,56 @@ class HelicalRail(Rail):
             return np.array([[ self.radius*np.sin(u)], [-self.radius*np.cos(u)], [0*u]])
         else:
             raise NotImplemented("Fourth or higher derivative")
+
+
+class LinearSpline(Rail):
+    """
+    Another test case. Warning -- has sharp corners! Not good
+    for a physically realizable roller-coaster, but in a
+    simulation we don't care since the part of the rail
+    (and probability of hitting a corner) is measure zero.
+    """
+    min_i=0
+    min_u=0.0
+    def __init__(self,control_points:np.array):
+        self.control_points=control_points
+        self.max_i=control_points.shape[1]-2
+        self.max_u=float(self.max_i)+1.0
+    def select_R(self,i:int):
+        return self.control_points[:,i:i+2]
+    def select_i(self,u:float):
+        try:
+            return set([int(i) for i in np.clip(np.floor(u),self.min_i,self.max_i)])
+        except TypeError:
+            return {int(np.clip(np.floor(u),self.min_i,self.max_i))}
+    def dnrdun(self, u: float, n: int) -> np.array:
+        """
+        Explicit nth derivative of the position vector for a circular rail.
+
+        :param u: parameter [1]
+        :param n: Order of the derivative
+        :param du: Differential angle (ignored for explicit calculation)
+        :return: nth derivative of the position vector [m/1**n]
+        """
+        ii=self.select_i(u)
+        result=[]
+        for i in ii:
+            this_u=u-i
+            R=self.select_R(i)
+            if n == 0:
+                result.append((1 - this_u) * R[:,newaxis,0] + this_u * R[:,newaxis,1])
+            elif n == 1:
+                result.append((R[:,newaxis,1]-R[:,newaxis,0])+this_u*0.0)
+            else:
+                result.append(R[:,newaxis,0]*0.0)
+        return np.hstack(result)
+    def r(self, u: float) -> np.array:
+        """
+        Position vector as a function of rail parameter.
+        :param u: Rail parameter
+        :return: Position of rail as a vector with components in meters
+        """
+        return self.dnrdun(u,0)
 
 
 
