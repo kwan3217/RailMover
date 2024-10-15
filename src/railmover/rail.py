@@ -331,6 +331,29 @@ class NDerivRail(Rail):
             return (self.dnrdun(u+self.du,n-1)-self.dnrdun(u,n-1))/self.du
 
 
+class StraightRail(Rail):
+    def __init__(self,r0:np.array,r1:np.array):
+        self.r0=r0
+        self.r1=r1
+    def r(self,u:float)->np.array:
+        return (1-u)*self.r0+u*self.r1
+    def dnrdun(self, u: float, n: int) -> np.array:
+        """
+        Explicit nth derivative of the position vector for a straight rail.
+
+        :param u: parameter [1]
+        :param n: Order of the derivative
+        :param du: Differential angle (ignored for explicit calculation)
+        :return: nth derivative of the position vector [m/1**n]
+        """
+        if n == 0:
+            return self.r(u)
+        elif n == 1:
+            return self.r1-self.r0
+        else:
+            return self.r0*0.0
+
+
 class CircularRail(Rail):
     def __init__(self, radius):
         self.radius = radius
