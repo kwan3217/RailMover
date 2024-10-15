@@ -589,70 +589,25 @@ class BSpline(CubicRail):
         return self.control_points[:,i:i+4]
 
 
-class BezierRail(Rail):
-    """
-    Describe a Bezier rail
-    """
-    B   =[[lambda u: 1.0                                ],
-          [lambda u: 1.0 - 1.0*u                        ,
-           lambda u: 0.0 + 1.0*u                        ],
-          [lambda u: 1.0 - 2.0*u +    1.0*u**2          ,
-           lambda u: 0.0 + 2.0*u -    2.0*u**2          ,
-           lambda u: 0.0 + 0.0*u +    1.0*u**2          ],
-          [lambda u: 1.0 - 3.0*u +    3.0*u**2 -1.0*u**3,
-           lambda u: 0.0 + 3.0*u -    6.0*u**2 +3.0*u**3,
-           lambda u: 0.0 + 0.0*u +    3.0*u**2 -3.0*u**3,
-           lambda u: 0.0 + 0.0*u +    0.0*u**2 +1.0*u**3]]
-    dB  =[[lambda u: 0.0                                 ],
-          [lambda u:     - 1.0                           ,
-           lambda u:     + 1.0                           ],
-          [lambda u:     - 2.0   +2.0*1.0*u              ,
-           lambda u:     + 2.0   -2.0*2.0*u              ,
-           lambda u:     + 0.0   +2.0*1.0*u              ],
-          [lambda u:     - 3.0   +2.0*3.0*u -3.0*1.0*u**2,
-           lambda u:     + 3.0   -2.0*6.0*u +3.0*3.0*u**2,
-           lambda u:     + 0.0   +2.0*3.0*u -3.0*3.0*u**2,
-           lambda u:     + 0.0   +2.0*0.0*u +3.0*1.0*u**2]]
-    ddB =[[lambda u: 0.0                       ],
-          [lambda u:     0.0                   ,
-           lambda u:     0.0                   ],
-          [lambda u:        +2.0*1.0           ,
-           lambda u:        -2.0*2.0           ,
-           lambda u:        +2.0*1.0           ],
-          [lambda u:        +2.0*3.0 -6.0*1.0*u,
-           lambda u:        -2.0*6.0 +6.0*3.0*u,
-           lambda u:        +2.0*3.0 -6.0*3.0*u,
-           lambda u:        +2.0*0.0 +6.0*1.0*u]]
-    dddB=[[lambda u: 0.0                       ],
-          [lambda u:     0.0                   ,
-           lambda u:     0.0                   ],
-          [lambda u:        +0.0           ,
-           lambda u:        -0.0           ,
-           lambda u:        +0.0           ],
-          [lambda u:         -6.0*1.0,
-           lambda u:         +6.0*3.0,
-           lambda u:         -6.0*3.0,
-           lambda u:         +6.0*1.0]]
-    def __init__(self,r0,r1,r2,r3):
-        self.r=[r0,r1,r2,r3]
-    def r(self, u: float) -> np.array:
-        result=self.r[0]*self.B[3][0]
-        for i,this_r in self.r[1:]:
-            result+=this_r*self.B[3][i+1]
-        return result
-    def drdu(self, u: float, du:float=1e-4)->np.array:
-        result=self.r[0]*self.dB[3][0]
-        for i,this_r in self.r[1:]:
-            result+=this_r*self.dB[3][i+1]
-        return result*du
-    def d2rdu2(self, u: float, du:float=1e-4)->np.array:
-        result=self.r[0]*self.dB[3][0]
-        for i,this_r in self.r[1:]:
-            result+=this_r*self.dB[3][i+1]
-        return result*du**2
-    def d3rdu3(self, u: float, du:float=1e-4)->np.array:
-        result=self.r[0]*self.dB[3][0]
-        for i,this_r in self.r[1:]:
-            result+=this_r*self.dB[3][i+1]
-        return result*du**3
+class BezierRail(CubicRail):
+    K=np.array([[ 1.0,-3.0, 3.0,-1.0],
+                [ 0.0, 3.0,-6.0, 3.0],
+                [ 0.0, 0.0, 3.0,-3.0],
+                [ 0.0, 0.0, 0.0, 1.0]])
+    min_i=0
+    min_u=0.0
+    def __init__(self,control_points:np.array):
+        """
+        Create a BSpline
+        """
+        if control_points.shape[1]<4:
+            raise ValueError("Not enough control points for even one segment")
+        if control_points.shape[1]%3!=1:
+            raise ValueError("Not a whole number of segments")
+        self.control_points=control_points
+        self.max_i=(control_points.shape[1]-1)//3
+        self.max_u=float(self.max_i)+1.0
+    def select_R(self,i:int):
+        return self.control_points[:,i//3:i//3+4]
+
 
