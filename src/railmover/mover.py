@@ -4,7 +4,8 @@ Describe purpose of this script here
 Created: 10/4/24
 """
 import numpy as np
-from kwanmath.vector import vdot
+from kwanmath.vector import vdot, vlength, vnormalize, vangle
+from matplotlib import pyplot as plt
 
 from railmover.rail import Rail
 
@@ -16,9 +17,9 @@ def vproj(a:np.array,b:np.array)->np.array:
     where theta is the angle between the vectors.
     :param a: projection base
     :param b: vector to project
-    :return: a vector in the same direction as a
+    :return: a vector in the same direction as a with length |b|cos(theta)
     """
-    return a*vdot(a,b)/vdot(a,a)
+    return vnormalize(a)*vdot(vnormalize(a),b)
 
 
 def vperp(a:np.array,b:np.array)->np.array:
